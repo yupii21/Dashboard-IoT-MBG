@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MBG — Monitoring Bermanfaat Gratis</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.14.1/mqtt.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+<style>
+  :root{
+    --bg:#0A0D10;
+    --panel:#12161A;
+    --panel-alt:#171C21;
+    --border:#232A31;
+    --text:#E8EDF1;
+    --text-dim:#7C8894;
+    --safe:#37D67A;
+    --warn:#F2B84B;
+    --danger:#FF5C5C;
+    --brand:#4FD1FF;
+    --mono:'JetBrains Mono', monospace;
+    --sans:'Inter', sans-serif;
+    --radius:10px;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+
+  body{
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(79,209,255,0.06), transparent 60%),
+      var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    min-height:100vh;
+    padding:20px;
+  }
+
+  a{ color:var(--brand); }
+
+  .wrap{ max-width:1180px; margin:0 auto; display:flex; flex-direction:column; gap:16px; }
+
+  /* ============ HEADER ============ */
+  header{
+    display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:16px 20px;
+  }
+  .brand{ display:flex; align-items:center; gap:20px; }
+  .brand-mark{
+    font-family:var(--mono); font-weight:800; font-size:44px; letter-spacing:3px;
+    color:var(--bg); background:var(--brand);
+    padding:10px 18px; border-radius:8px; line-height:1;
+    box-shadow:0 0 24px rgba(79,209,255,0.35);
+  }
+  .brand-text .title{ font-family:var(--mono); font-weight:700; font-size:21px; letter-spacing:2px; color:var(--text); text-transform:uppercase; }
+  .brand-text .subtitle{ font-size:14.5px; color:var(--text-dim); margin-top:4px; }
+
+  .header-right{ display:flex; align-items:center; gap:18px; }
+  .clock{ font-family:var(--mono); font-size:15px; color:var(--text); min-width:150px; text-align:right; }
+  .conn{ display:flex; align-items:center; gap:8px; font-family:var(--mono); font-size:12.5px; letter-spacing:1px; text-transform:uppercase; color:var(--text-dim); }
+  .led{ width:9px; height:9px; border-radius:50%; background:var(--danger); box-shadow:0 0 8px var(--danger); flex:none; }
+  .led.on{ background:var(--safe); box-shadow:0 0 8px var(--safe); }
+  .led.pulse{ animation:pulse 1.6s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce){ .led.pulse{ animation:none; } }
+  @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:.45; } }
+
+  button{
+    font-family:var(--sans); font-weight:600; font-size:13.5px; cursor:pointer;
+    border-radius:7px; border:1px solid var(--border); padding:10px 16px;
+    background:var(--panel-alt); color:var(--text);
+    transition:filter .15s ease, transform .05s ease;
+  }
+  button:hover{ filter:brightness(1.15); }
+  button:active{ transform:translateY(1px); }
+  button:focus-visible{ outline:2px solid var(--brand); outline-offset:2px; }
+  button.primary{ background:var(--brand); color:#03181f; border-color:var(--brand); }
+  button.danger-outline{ border-color:var(--danger); color:var(--danger); background:transparent; }
+
+  /* ============ PANEL GENERIC ============ */
+  .panel{ background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:18px 20px; }
+  .panel-title{ font-family:var(--mono); font-size:12px; letter-spacing:2px; text-transform:uppercase; color:var(--text-dim); margin:0 0 14px 0; display:flex; align-items:center; gap:8px; }
+  .panel-title::before{ content:''; width:3px; height:13px; background:var(--brand); border-radius:2px; display:inline-block; }
+
+  /* ============ GAUGES ROW ============ */
+  .gauges{ display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; }
+  .gauge-card{ background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:18px; display:flex; flex-direction:column; align-items:center; }
+  .gauge-card .label{ font-family:var(--mono); font-size:12px; letter-spacing:2px; text-transform:uppercase; color:var(--text-dim); margin-bottom:4px; }
+  .gauge-svg-wrap{ position:relative; width:100%; max-width:190px; }
+  .gauge-readout{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  .gauge-readout .value{ font-family:var(--mono); font-weight:700; font-size:30px; line-height:1; }
+  .gauge-readout .unit{ font-family:var(--mono); font-size:11px; color:var(--text-dim); margin-top:4px; letter-spacing:1px; }
+
+  /* ============ STATUS + CONTROL ROW ============ */
+  .mid-row{ display:grid; grid-template-columns:1.1fr .9fr; gap:16px; }
+  @media (max-width:820px){ .mid-row{ grid-template-columns:1fr; } .gauges{ grid-template-columns:1fr; } }
+
+  .status-rows{ display:flex; flex-direction:column; gap:0; }
+  .status-row{ display:flex; align-items:center; justify-content:space-between; padding:11px 2px; border-bottom:1px solid var(--border); }
+  .status-row:last-child{ border-bottom:none; }
+  .status-row .k{ font-size:13.5px; color:var(--text-dim); display:flex; align-items:center; gap:9px; }
+  .status-row .v{ font-family:var(--mono); font-weight:600; font-size:14.5px; letter-spacing:.5px; }
+  .badge{ font-family:var(--mono); font-size:11.5px; font-weight:700; letter-spacing:1px; padding:3px 9px; border-radius:5px; text-transform:uppercase; }
+  .badge.normal{ background:rgba(55,214,122,.14); color:var(--safe); }
+  .badge.warning{ background:rgba(242,184,75,.14); color:var(--warn); }
+  .badge.emergency{ background:rgba(255,92,92,.16); color:var(--danger); }
+
+  .control-body{ display:flex; flex-direction:column; gap:14px; }
+  .control-item{ display:flex; align-items:center; justify-content:space-between; background:var(--panel-alt); border:1px solid var(--border); border-radius:8px; padding:14px 16px; }
+  .control-item .k{ font-size:13.5px; }
+  .control-item .desc{ font-size:11.5px; color:var(--text-dim); margin-top:2px; }
+
+  .switch{ position:relative; width:52px; height:28px; flex:none; }
+  .switch input{ opacity:0; width:0; height:0; position:absolute; }
+  .switch .track{ position:absolute; inset:0; background:#2a323a; border-radius:16px; transition:background .15s ease; cursor:pointer; }
+  .switch input:checked + .track{ background:var(--brand); }
+  .switch .thumb{ position:absolute; top:3px; left:3px; width:22px; height:22px; background:#0A0D10; border-radius:50%; transition:transform .15s ease; }
+  .switch input:checked + .track .thumb{ transform:translateX(24px); }
+  .switch input:focus-visible + .track{ outline:2px solid var(--brand); outline-offset:2px; }
+
+  /* ============ CHARTS ============ */
+  .charts{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+  @media (max-width:820px){ .charts{ grid-template-columns:1fr; } }
+  .chart-card{ background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:16px; }
+  .chart-card canvas{ max-height:160px; }
+
+  /* ============ HISTORY TABLE ============ */
+  .table-wrap{ overflow-x:auto; }
+  table{ width:100%; border-collapse:collapse; font-family:var(--mono); font-size:12.5px; }
+  thead th{ text-align:left; color:var(--text-dim); font-weight:600; letter-spacing:1px; text-transform:uppercase; font-size:10.5px; padding:8px 10px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  tbody td{ padding:9px 10px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  tbody tr:hover{ background:var(--panel-alt); }
+  tbody tr:nth-child(even){ background:rgba(255,255,255,0.015); }
+  .empty-row td{ color:var(--text-dim); text-align:center; padding:22px; font-family:var(--sans); }
+
+  footer{ text-align:center; color:var(--text-dim); font-size:11.5px; padding:10px 0 4px; font-family:var(--mono); letter-spacing:.5px; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- ============ HEADER ============ -->
+  <header>
+    <div class="brand">
+      <div class="brand-mark">MBG</div>
+      <div class="brand-text">
+        <div class="title">Monitoring Bermanfaat Gratis</div>
+        <div class="subtitle">Smart Industrial Safety Monitoring — Inverter Room</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="conn"><span id="connLed" class="led"></span><span id="connText">Terputus</span></div>
+      <div class="clock" id="clock">--:--:--</div>
+    </div>
+  </header>
+
+  <!-- ============ GAUGES ============ -->
+  <div class="gauges">
+    <div class="gauge-card">
+      <div class="label">Suhu</div>
+      <div class="gauge-svg-wrap" id="gaugeSuhu"></div>
+    </div>
+    <div class="gauge-card">
+      <div class="label">Kelembaban</div>
+      <div class="gauge-svg-wrap" id="gaugeHum"></div>
+    </div>
+    <div class="gauge-card">
+      <div class="label">Gas MQ2</div>
+      <div class="gauge-svg-wrap" id="gaugeGas"></div>
+    </div>
+  </div>
+
+  <!-- ============ STATUS + KONTROL ============ -->
+  <div class="mid-row">
+    <div class="panel">
+      <p class="panel-title">Status Sistem</p>
+      <div class="status-rows">
+        <div class="status-row"><span class="k">Status</span><span class="v"><span id="statusBadge" class="badge normal">—</span></span></div>
+        <div class="status-row"><span class="k">Mode</span><span class="v" id="modeVal">—</span></div>
+        <div class="status-row"><span class="k">Pintu</span><span class="v" id="doorVal">—</span></div>
+        <div class="status-row"><span class="k">Waktu (RTC)</span><span class="v" id="tsVal">—</span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="panel-title">Kontrol</p>
+      <div class="control-body">
+        <div class="control-item">
+          <div>
+            <div class="k">Buka Pintu (Remote)</div>
+            <div class="desc">Kirim perintah unlock ke ESP32</div>
+          </div>
+          <button class="primary" id="btnUnlock">Buka</button>
+        </div>
+        <div class="control-item">
+          <div>
+            <div class="k">Mode Manual</div>
+            <div class="desc">AUTO memakai sensor DHT22, MANUAL memakai potensiometer</div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="switchMode">
+            <span class="track"><span class="thumb"></span></span>
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ GRAFIK ============ -->
+  <div class="charts">
+    <div class="chart-card"><canvas id="chartSuhu"></canvas></div>
+    <div class="chart-card"><canvas id="chartHum"></canvas></div>
+    <div class="chart-card"><canvas id="chartGas"></canvas></div>
+  </div>
+
+  <!-- ============ RIWAYAT ============ -->
+  <div class="panel">
+    <p class="panel-title">Riwayat Sistem</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Waktu</th><th>Status</th><th>Suhu (°C)</th><th>Kelembaban (%)</th><th>Gas (ADC)</th><th>Mode</th></tr>
+        </thead>
+        <tbody id="historyBody">
+          <tr class="empty-row"><td colspan="6">Menunggu data histori...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>MBG · Monitoring Bermanfaat Gratis — ESP32-S3 Safety Monitoring System</footer>
+</div>
+
+<script>
+/* =========================================================
+   JAM LOKAL
+========================================================= */
+function tickClock(){
+  document.getElementById('clock').textContent = new Date().toLocaleTimeString('id-ID', { hour12:false });
+}
+tickClock();
+setInterval(tickClock, 1000);
+
+/* =========================================================
+   GAUGE ANALOG (SVG busur 270 derajat, custom)
+========================================================= */
+function createGauge(containerId, opts){
+  const el = document.getElementById(containerId);
+  const size = 190, r = 78, cx = size/2, cy = size/2;
+  const circumference = 2 * Math.PI * r;
+  const sweep = 270 / 360;              // busur aktif 270 derajat
+  const arcLen = circumference * sweep;
+  const rotation = 135;                  // supaya celah 90 derajat ada di bawah
+
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
+  svg.setAttribute('width', '100%');
+
+  const track = document.createElementNS(ns, 'circle');
+  track.setAttribute('cx', cx); track.setAttribute('cy', cy); track.setAttribute('r', r);
+  track.setAttribute('fill', 'none');
+  track.setAttribute('stroke', '#232A31');
+  track.setAttribute('stroke-width', 10);
+  track.setAttribute('stroke-linecap', 'round');
+  track.setAttribute('stroke-dasharray', `${arcLen} ${circumference}`);
+  track.setAttribute('transform', `rotate(${rotation} ${cx} ${cy})`);
+  svg.appendChild(track);
+
+  // tanda skala (ticks)
+  const tickCount = 10;
+  for(let i=0;i<=tickCount;i++){
+    const ang = (135 + (270 * i / tickCount)) * Math.PI/180;
+    const x1 = cx + (r+9) * Math.cos(ang), y1 = cy + (r+9) * Math.sin(ang);
+    const x2 = cx + (r+15) * Math.cos(ang), y2 = cy + (r+15) * Math.sin(ang);
+    const tick = document.createElementNS(ns,'line');
+    tick.setAttribute('x1',x1); tick.setAttribute('y1',y1);
+    tick.setAttribute('x2',x2); tick.setAttribute('y2',y2);
+    tick.setAttribute('stroke', '#3a434c');
+    tick.setAttribute('stroke-width', 2);
+    svg.appendChild(tick);
+  }
+
+  const value = document.createElementNS(ns, 'circle');
+  value.setAttribute('cx', cx); value.setAttribute('cy', cy); value.setAttribute('r', r);
+  value.setAttribute('fill', 'none');
+  value.setAttribute('stroke', opts.color || '#37D67A');
+  value.setAttribute('stroke-width', 10);
+  value.setAttribute('stroke-linecap', 'round');
+  value.setAttribute('stroke-dasharray', `0 ${circumference}`);
+  value.setAttribute('transform', `rotate(${rotation} ${cx} ${cy})`);
+  value.style.transition = 'stroke-dasharray .4s ease, stroke .3s ease';
+  svg.appendChild(value);
+
+  el.appendChild(svg);
+
+  const readout = document.createElement('div');
+  readout.className = 'gauge-readout';
+  readout.innerHTML = `<div class="value" id="${containerId}_val">--</div><div class="unit">${opts.unit}</div>`;
+  el.appendChild(readout);
+
+  return {
+    update(v){
+      const clamped = Math.max(opts.min, Math.min(opts.max, v));
+      const pct = (clamped - opts.min) / (opts.max - opts.min);
+      const len = arcLen * pct;
+      value.setAttribute('stroke-dasharray', `${len} ${circumference}`);
+
+      let color = opts.colors[0];
+      if(opts.warnAt !== undefined && v >= opts.warnAt) color = opts.colors[1];
+      if(opts.dangerAt !== undefined && v >= opts.dangerAt) color = opts.colors[2];
+      value.setAttribute('stroke', color);
+
+      document.getElementById(`${containerId}_val`).textContent = (typeof v === 'number') ? (Number.isInteger(v) ? v : v.toFixed(1)) : '--';
+      document.getElementById(`${containerId}_val`).style.color = color;
+    }
+  };
+}
+
+const gaugeSuhu = createGauge('gaugeSuhu', { min:0, max:50, unit:'°C', warnAt:25, dangerAt:30, colors:['#37D67A','#F2B84B','#FF5C5C'] });
+const gaugeHum  = createGauge('gaugeHum',  { min:0, max:100, unit:'%',  colors:['#4FD1FF','#4FD1FF','#4FD1FF'] });
+const gaugeGas  = createGauge('gaugeGas',  { min:0, max:4095, unit:'adc', warnAt:1500, dangerAt:2000, colors:['#37D67A','#F2B84B','#FF5C5C'] });
+
+/* =========================================================
+   GRAFIK (Chart.js)
+========================================================= */
+function makeLineChart(ctxId, label, color){
+  const ctx = document.getElementById(ctxId);
+  return new Chart(ctx, {
+    type:'line',
+    data:{ labels:[], datasets:[{ label, data:[], borderColor:color, backgroundColor:'transparent', tension:0.35, pointRadius:0, borderWidth:2 }] },
+    options:{
+      animation:false,
+      responsive:true,
+      maintainAspectRatio:false,
+      scales:{
+        x:{ ticks:{ color:'#7C8894', maxTicksLimit:6 }, grid:{ color:'#1b2126' } },
+        y:{ ticks:{ color:'#7C8894' }, grid:{ color:'#1b2126' } }
+      },
+      plugins:{ legend:{ display:false } }
+    }
+  });
+}
+const chartSuhu = makeLineChart('chartSuhu', 'Suhu (°C)', '#F2B84B');
+const chartHum  = makeLineChart('chartHum',  'Kelembaban (%)', '#4FD1FF');
+const chartGas  = makeLineChart('chartGas',  'Gas (ADC)', '#37D67A');
+
+function pushPoint(chart, label, value, maxPoints=40){
+  chart.data.labels.push(label);
+  chart.data.datasets[0].data.push(value);
+  if(chart.data.labels.length > maxPoints){
+    chart.data.labels.shift();
+    chart.data.datasets[0].data.shift();
+  }
+  chart.update('none');
+}
+
+/* =========================================================
+   RIWAYAT TABLE
+========================================================= */
+const MAX_HISTORY_ROWS = 50;
+let historyRows = [];
+
+function statusBadgeHtml(status){
+  const cls = (status || '').toLowerCase() === 'emergency' ? 'emergency' : (status || '').toLowerCase() === 'warning' ? 'warning' : 'normal';
+  return `<span class="badge ${cls}">${status || '—'}</span>`;
+}
+
+function renderHistory(){
+  const body = document.getElementById('historyBody');
+  if(historyRows.length === 0){
+    body.innerHTML = '<tr class="empty-row"><td colspan="6">Menunggu data histori...</td></tr>';
+    return;
+  }
+  body.innerHTML = historyRows.map(r => `
+    <tr>
+      <td>${r.timestamp ?? '—'}</td>
+      <td>${statusBadgeHtml(r.status)}</td>
+      <td>${r.temperature ?? '—'}</td>
+      <td>${r.humidity ?? '—'}</td>
+      <td>${r.gas_raw ?? '—'}</td>
+      <td>${r.mode ?? '—'}</td>
+    </tr>
+  `).join('');
+}
+
+function addHistoryRow(data){
+  historyRows.unshift(data);
+  if(historyRows.length > MAX_HISTORY_ROWS) historyRows = historyRows.slice(0, MAX_HISTORY_ROWS);
+  renderHistory();
+}
+
+/* =========================================================
+   STATUS PANEL
+========================================================= */
+function updateStatusPanel(d){
+  const badge = document.getElementById('statusBadge');
+  const cls = (d.status || '').toLowerCase() === 'emergency' ? 'emergency' : (d.status || '').toLowerCase() === 'warning' ? 'warning' : 'normal';
+  badge.className = `badge ${cls}`;
+  badge.textContent = d.status ?? '—';
+
+  document.getElementById('modeVal').textContent = d.mode ?? '—';
+  document.getElementById('doorVal').textContent = (d.door_locked === true) ? 'Terkunci' : (d.door_locked === false ? 'Terbuka' : '—');
+  document.getElementById('tsVal').textContent = d.timestamp ?? '—';
+
+  if(typeof d.temperature === 'number') gaugeSuhu.update(d.temperature);
+  if(typeof d.humidity === 'number') gaugeHum.update(d.humidity);
+  if(typeof d.gas_raw === 'number') gaugeGas.update(d.gas_raw);
+
+  const label = (d.timestamp ?? '').toString().slice(11,19) || new Date().toLocaleTimeString('id-ID',{hour12:false});
+  if(typeof d.temperature === 'number') pushPoint(chartSuhu, label, d.temperature);
+  if(typeof d.humidity === 'number') pushPoint(chartHum, label, d.humidity);
+  if(typeof d.gas_raw === 'number') pushPoint(chartGas, label, d.gas_raw);
+
+  // sinkronkan switch mode manual tanpa memicu event publish ulang
+  const sw = document.getElementById('switchMode');
+  sw.checked = (d.mode === 'MANUAL');
+}
+
+/* =========================================================
+   KONEKSI MQTT (via WebSocket / WSS) — auto-connect, kredensial tetap
+   Ubah nilai di MQTT_CONFIG di bawah ini kalau host/kredensial berubah.
+========================================================= */
+const MQTT_CONFIG = {
+  host: '21e4f9cb82eb49ea9bb25f4e993cbed5.s1.eu.hivemq.cloud',
+  port: 8884,
+  path: '/mqtt',
+  username: 'Yupii',
+  password: '12345678'
+};
+
+const TOPICS = {
+  status: 'safetymon/status',
+  history: 'inverter_room/history',
+  controlDoor: 'safetymon/control/door',
+  controlMode: 'safetymon/control/mode'
+};
+
+let client = null;
+
+function setConn(connected){
+  document.getElementById('connLed').classList.toggle('on', connected);
+  document.getElementById('connLed').classList.toggle('pulse', connected);
+  document.getElementById('connText').textContent = connected ? 'Terhubung' : 'Terputus';
+}
+
+function connectMqtt(){
+  const url = `wss://${MQTT_CONFIG.host}:${MQTT_CONFIG.port}${MQTT_CONFIG.path}`;
+  setConn(false);
+
+  client = mqtt.connect(url, {
+    username: MQTT_CONFIG.username,
+    password: MQTT_CONFIG.password,
+    clientId: 'mbg-web-' + Math.random().toString(16).slice(2,8),
+    clean:true, reconnectPeriod:4000, connectTimeout:8000
+  });
+
+  client.on('connect', () => {
+    setConn(true);
+    client.subscribe([TOPICS.status, TOPICS.history], { qos:1 });
+  });
+
+  client.on('reconnect', () => setConn(false));
+  client.on('close', () => setConn(false));
+  client.on('error', () => setConn(false));
+
+  client.on('message', (topic, message) => {
+    let payload;
+    try{ payload = JSON.parse(message.toString()); }catch(e){ return; }
+
+    if(topic === TOPICS.status){
+      updateStatusPanel(payload);
+    } else if(topic === TOPICS.history){
+      addHistoryRow(payload);
+    }
+  });
+}
+
+connectMqtt(); // auto-connect begitu halaman dibuka
+
+/* =========================================================
+   KONTROL: UNLOCK DOOR & MANUAL MODE SWITCH
+========================================================= */
+document.getElementById('btnUnlock').addEventListener('click', () => {
+  if(!client || !client.connected) return;
+  client.publish(TOPICS.controlDoor, 'UNLOCK', { qos:1 });
+});
+
+document.getElementById('switchMode').addEventListener('change', (e) => {
+  if(!client || !client.connected){ e.target.checked = !e.target.checked; return; }
+  client.publish(TOPICS.controlMode, e.target.checked ? 'MANUAL' : 'AUTO', { qos:1 });
+});
+</script>
+</body>
+</html>
